@@ -1,7 +1,8 @@
 # SAÜScript — Masaüstü Yardımcı Programı
 
 Bu depo, [**SAÜScript**](https://yagizberkesu.github.io/sauscript/) için masaüstü yardımcı
-programının indirilebilir sürümlerini barındırır. Kod içermez, yalnızca yayınlanan dosyalar burada durur.
+programının kaynak kodunu ve indirilebilir sürümlerini barındırır. Program açık kaynaklıdır
+([MIT lisansı](LICENSE)): ne yaptığını satır satır okuyabilir, istersen kendin derleyebilirsin.
 
 **[→ Son sürümü indir](https://github.com/yagizberkesu/sauscript-releases/releases/latest/download/SAUScript-Yardimci.exe)**
 
@@ -44,6 +45,37 @@ Program ücretli bir kod imzalama sertifikasıyla imzalanmadığı için Windows
 - Okunan sayfa metni bilgisayarından çıkmaz; yalnızca `127.0.0.1` üzerinden, açık olan siteye verilir.
 - Yerel sunucu sadece kendi bilgisayarını dinler, ağdaki başka cihazlar erişemez.
 - İş bittiğinde program kendini kapatır.
+
+## Kaynak kod
+
+| Dosya | Ne yapar |
+| --- | --- |
+| [`scripts/fetch-notlar-handler.ts`](scripts/fetch-notlar-handler.ts) | Programın kendisi: tarayıcıyı açar, SABİS sayfasının metnini okur, `127.0.0.1:53412` üzerinden siteye verir |
+| [`scripts/build-exe.mjs`](scripts/build-exe.mjs) | Kodu Node.js'in [tek dosyalık çalıştırılabilir](https://nodejs.org/api/single-executable-applications.html) özelliğiyle `.exe`'ye paketler |
+| [`src/parser.ts`](src/parser.ts), [`src/types.ts`](src/types.ts) | Transkript metnini derslere ayıran, sitedekiyle aynı ayrıştırıcı |
+
+Programın dış bağımlılığı yoktur; yalnızca Node.js'in kendi modüllerini kullanır. İnternete yalnızca
+açtığın tarayıcı penceresi üzerinden, SABİS'e (`obs.sabis.sakarya.edu.tr`) bağlanır.
+
+### Kendin derlemek için
+
+Windows'ta [Node.js 22 veya üstü](https://nodejs.org/) kurulu olmalı.
+
+```bash
+npm install
+npm run build
+```
+
+Çıktı `build/SAUScript-Yardimci.exe` olur. Derlemeden, doğrudan kaynaktan da çalıştırabilirsin:
+
+```bash
+npm run register   # sauscript:// bağlantılarını bu kaynak klasöre yönlendirir
+npm run file       # siteye aktarmak yerine sonucu JSON dosyasına yazar
+```
+
+## Lisans
+
+[MIT](LICENSE) — kullanabilir, değiştirebilir ve paylaşabilirsin; yalnızca lisans metnini korumalısın.
 
 ## Kaldırma
 

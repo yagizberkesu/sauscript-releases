@@ -39,6 +39,15 @@ veya benzeri Chromium tabanlı bir tarayıcı bulunmalı — varsayılan tarayı
 Program ücretli bir kod imzalama sertifikasıyla imzalanmadığı için Windows ilk açılışta
 "bilinmeyen yayımcı" uyarısı verebilir. **Ek bilgi → Yine de çalıştır** ile geçebilirsin.
 
+### İndirdiğin dosyayı doğrulama
+
+v1.2.0'dan itibaren her sürüm GitHub Actions üzerinde kaynak koddan otomatik derlenir; sürüm sayfasında
+exe'nin SHA256 özeti ve `SAUScript-Yardimci.exe.sha256` dosyası bulunur. PowerShell'de karşılaştırmak için:
+
+```powershell
+Get-FileHash .\SAUScript-Yardimci.exe
+```
+
 ## Gizlilik
 
 - SABİS şifreni **program görmez**. Şifreyi açılan tarayıcı penceresinde doğrudan SABİS'e girersin.

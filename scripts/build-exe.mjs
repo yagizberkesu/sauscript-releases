@@ -49,7 +49,7 @@ try {
 
 console.log("[4/5] Blob exe'ye gömülüyor...");
 execFileSync("npx", [
-  "--yes", "postject", exePath, "NODE_SEA_BLOB", blobPath,
+  "--yes", "postject", `"${exePath}"`, "NODE_SEA_BLOB", `"${blobPath}"`,
   "--sentinel-fuse", "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2"
 ], { stdio: "inherit", shell: process.platform === "win32" });
 

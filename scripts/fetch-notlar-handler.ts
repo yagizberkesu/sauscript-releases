@@ -17,6 +17,7 @@ const HOME_DIR = join(homedir(), ".sauscript");
 const PROFILE_DIR = join(HOME_DIR, "browser-profile");
 const LOGIN_TIMEOUT = 15 * 60 * 1000;
 const PICKUP_TIMEOUT = 5 * 60 * 1000;
+const SECONDARY_TIMEOUT = 45 * 1000;
 
 type Phase = "starting" | "login" | "reading" | "ready" | "error";
 
@@ -297,6 +298,40 @@ async function closeBrowser(debugPort: number) {
   }
 }
 
+/**
+ * Önceki oturumdan kalan eski sekmeleri kapatır. Kalıcı profil yüzünden tarayıcı
+ * tekrar açıldığında eski SABİS sayfaları (giriş ekranı, transkript vb.) veya
+ * boş sekmeler durduğu gibi kalıyor — kullanıcı için kafa karıştırıcı.
+ * Yalnızca keepUrl ile eşleşen (veya en son açılan) sekmeyi tutar.
+ */
+async function closeStalePages(debugPort: number, keepUrl: string) {
+  try {
+    const pages = await listPages(debugPort);
+    if (pages.length <= 1) return;
+
+    // Hedef URL ile başlayan sekmeyi veya (yoksa) listedeki son sekmeyi koru.
+    const keeper = pages.find((p) => p.url.startsWith(keepUrl)) ?? pages[pages.length - 1];
+    const stale = pages.filter((p) => p.id !== keeper.id);
+    if (!stale.length) return;
+
+    // Target.closeTarget browser seviyesinde bir komut; /json/version üzerinden bağlanıyoruz.
+    const response = await fetch(`http://127.0.0.1:${debugPort}/json/version`);
+    const info = (await response.json()) as { webSocketDebuggerUrl?: string };
+    if (!info.webSocketDebuggerUrl) return;
+
+    const session = await CdpSession.open({
+      id: "browser", type: "browser", url: "", webSocketDebuggerUrl: info.webSocketDebuggerUrl
+    });
+    for (const page of stale) {
+      await session.send("Target.closeTarget", { targetId: page.id }).catch(() => {});
+    }
+    session.close();
+    log(`${stale.length} eski sekme kapatıldı.`);
+  } catch {
+    // Kritik değil; başarısız olursa akış devam etsin.
+  }
+}
+
 async function waitForDebugPort() {
   const portFile = join(PROFILE_DIR, "DevToolsActivePort");
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -318,10 +353,12 @@ async function waitForDebugPort() {
 // --- Hedef sayfalar -------------------------------------------------------
 
 interface Target {
-  key: "transkript" | "secilen";
+  key: "transkript" | "secilen" | "sinav" | "program";
   url: string;
   label: string;
   debugFile: string;
+  /** Metin kontrolü gevşekse önceki sayfa yanlışlıkla "hazır" sayılmasın diye adres de eşleşmeli. */
+  requireUrl?: boolean;
   /** Sayfa metni işlenebilir hale geldi mi? */
   isReady(text: string): boolean;
   build(text: string): string;
@@ -360,12 +397,32 @@ const selectedCoursesTarget: Target = {
   }
 };
 
+const examsTarget: Target = {
+  key: "sinav",
+  url: `${OBS_ORIGIN}/Ogrenci/SinavTakvimi`,
+  label: "Sınav Takvimi",
+  debugFile: "sinav-takvimi-debug.txt",
+  requireUrl: true,
+  isReady: (text) => text.includes("Sınav") || text.includes("Tarih"),
+  build(text) { return JSON.stringify({ mode: this.key, text }); }
+};
+
+const scheduleTarget: Target = {
+  key: "program",
+  url: `${OBS_ORIGIN}/Ogrenci/DersProgrami`,
+  label: "Ders Programı",
+  debugFile: "ders-programi-debug.txt",
+  requireUrl: true,
+  isReady: (text) => text.includes("Pazartesi") || text.includes("Ders"),
+  build(text) { return JSON.stringify({ mode: this.key, text }); }
+};
+
 /**
  * Kullanıcı SABİS girişini açılan pencerede kendisi yapar; burada sadece adres
  * çubuğunu ve sayfa metnini izleriz — konsolda Enter beklemek yok.
  */
-async function waitForPageText(debugPort: number, target: Target) {
-  const deadline = Date.now() + LOGIN_TIMEOUT;
+async function waitForPageText(debugPort: number, target: Target, timeout = LOGIN_TIMEOUT) {
+  const deadline = Date.now() + timeout;
   let session: CdpSession | null = null;
   let lastNavigation = 0;
   // OBS'e gidilip login'e yönlendirilirken adres bir an OBS'te görünüyor; "giriş
@@ -418,7 +475,8 @@ async function waitForPageText(debugPort: number, target: Target) {
         session ??= await CdpSession.open(page);
         const result = await session.send("Runtime.evaluate", { expression: SCRAPE_SNIPPET, returnByValue: true });
         const text = String(result?.result?.value ?? "");
-        if (target.isReady(text)) return text;
+        const onTargetPage = !target.requireUrl || page.url.toLowerCase().startsWith(target.url.toLowerCase());
+        if (onTargetPage && target.isReady(text)) return text;
 
         // Doğru alan adındayız ama hedef sayfada değiliz: oraya götür.
         if (Date.now() - lastNavigation > 6000) {
@@ -547,12 +605,13 @@ async function main() {
     process.exit(code);
   }
 
+  const isCombined = arg.includes("fetch-all");
   const target = arg.includes("fetch-selected") ? selectedCoursesTarget : transcriptTarget;
   // --file: protokol kurulu değilken elle çalıştırmak için; veriyi sunmak yerine dosyaya yazar.
   const fileMode = arg.includes("--file");
-  status.mode = target.key;
+  status.mode = isCombined ? "combined" : target.key;
 
-  log(`SAÜScript yardımcı programı — ${target.label}`);
+  log(`SAÜScript yardımcı programı — ${isCombined ? "Tüm SABİS verileri" : target.label}`);
   const closeServer = fileMode ? () => process.exit(0) : await startServer();
 
   let child: ChildProcess | null = null;
@@ -566,9 +625,55 @@ async function main() {
     child = launchBrowser(exe, target.url);
     debugPort = await waitForDebugPort();
 
+    // Önceki oturumdan kalan eski SABİS sekmelerini temizle.
+    await closeStalePages(debugPort, target.url);
+
     const text = await waitForPageText(debugPort, target);
     await writeFile(join(HOME_DIR, target.debugFile), text, "utf-8").catch(() => {});
-    payload = target.build(text);
+
+    if (isCombined) {
+      // Transkript okundu; şimdi seçilen dersleri de çekmeye çalış.
+      const courses = parsePastedTranscript(text);
+      log(`Transkript okundu: ${courses.length} ders. Seçilen dersler sayfasına geçiliyor…`);
+      setPhase("reading", `${courses.length} ders bulundu. Seçilen Dersler sayfası okunuyor…`);
+
+      // Kullanıcı zaten giriş yaptı; ek sayfalar açılmazsa uzun süre bekletmeden geç.
+      const readOptional = async (extra: Target) => {
+        try {
+          const extraText = await waitForPageText(debugPort, extra, SECONDARY_TIMEOUT);
+          await writeFile(join(HOME_DIR, extra.debugFile), extraText, "utf-8").catch(() => {});
+          log(`${extra.label} okundu.`);
+          return extraText;
+        } catch {
+          log(`${extra.label} okunamadı, olan verilerle devam edilecek.`);
+          return null;
+        }
+      };
+
+      const selectedText = await readOptional(selectedCoursesTarget);
+      setPhase("reading", "Sınav Takvimi okunuyor…");
+      const examsText = await readOptional(examsTarget);
+      setPhase("reading", "Ders Programı okunuyor…");
+      const scheduleText = await readOptional(scheduleTarget);
+
+      const backup = {
+        format: "sauscript-backup",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        state: { courses, scenarios: [], gradePoints: SAU_GRADE_POINTS, mode: "sau" as const },
+        termPlan: { season: "fall", selections: {}, scores: {}, goals: {}, started: false, startedAt: "" },
+        theme: "light"
+      };
+      const result: Record<string, unknown> = { mode: "combined", backup };
+      if (selectedText && parseSelectedCourses(selectedText).length > 0) result.selectedText = selectedText;
+      if (examsText) result.examsText = examsText;
+      if (scheduleText) result.scheduleText = scheduleText;
+
+      setPhase("ready", `${courses.length} ders bulundu, tüm bilgiler aktarılıyor…`);
+      payload = JSON.stringify(result);
+    } else {
+      payload = target.build(text);
+    }
   } catch (error) {
     setPhase("error", error instanceof Error ? error.message : String(error));
   } finally {
@@ -594,6 +699,11 @@ async function main() {
       await writeFile(filename, JSON.stringify(parsed.backup, null, 2), "utf-8");
       console.log(`\nKaydedildi: ${filename}`);
       console.log("SAÜScript'te 'Veri yedeği' > 'JSON yedeğini yükle' ile bu dosyayı seçebilirsin.");
+      if (parsed.selectedText) {
+        const selFilename = `sauscript-secilen-dersler-${stamp}.txt`;
+        await writeFile(selFilename, parsed.selectedText, "utf-8");
+        console.log(`Kaydedildi: ${selFilename}`);
+      }
     } else {
       const filename = `sauscript-secilen-dersler-${stamp}.txt`;
       await writeFile(filename, parsed.text, "utf-8");

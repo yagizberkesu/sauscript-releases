@@ -1,0 +1,38 @@
+name: Hata bildir
+description: Sitede ya da yardımcı programda çalışmayan bir şey
+title: "[Hata] "
+labels: ["hata"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bildirdiğin için teşekkürler! Lütfen **notlarını, öğrenci numaranı veya SABİS şifreni yazma** — bu sayfa herkese açık.
+  - type: dropdown
+    id: nerede
+    attributes:
+      label: Sorun nerede?
+      options:
+        - Site (not hesaplama, dönem takibi vb.)
+        - Transkript / seçilen dersler aktarma
+        - Masaüstü yardımcı programı (SABİS'ten otomatik çek)
+        - Telefondan yer imiyle aktarma
+        - Diğer
+    validations:
+      required: true
+  - type: textarea
+    id: ne-oldu
+    attributes:
+      label: Ne oldu?
+      description: Ne yapmaya çalışıyordun, ne bekliyordun, ne oldu?
+    validations:
+      required: true
+  - type: input
+    id: cihaz
+    attributes:
+      label: Cihaz ve tarayıcı
+      placeholder: "Örn: Windows 11 · Chrome, iPhone · Safari"
+  - type: textarea
+    id: ekran
+    attributes:
+      label: Ekran görüntüsü (isteğe bağlı)
+      description: Görüntüyü buraya sürükleyip bırakabilirsin. Kişisel bilgileri karalamayı unutma.

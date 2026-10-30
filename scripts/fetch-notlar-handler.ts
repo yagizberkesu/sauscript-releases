@@ -51,9 +51,18 @@ function setPhase(phase: Phase, message: string) {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Veri yalnızca SAÜScript'in kendi sitesine verilir: "*.github.io" herkesin açabildiği
+// bir alan adı olduğu için oradaki başka bir sayfa da transkripti okuyabilirdi.
+const SITE_ORIGIN = "https://yagizberkesu.github.io";
+
 function isAllowedOrigin(origin: string) {
-  if (/^https:\/\/[a-z0-9-]+\.github\.io$/i.test(origin)) return true;
+  if (origin === SITE_ORIGIN) return true;
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
+/** DNS rebinding'e karşı: istek gerçekten 127.0.0.1/localhost adına gelmiş olmalı. */
+function isLocalHost(host: string | undefined) {
+  return host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
 }
 
 /** Sunucuyu hemen aç: site "yardımcı program kurulu mu?" sorusunu ilk saniyede yanıtlayabilsin. */
@@ -63,7 +72,13 @@ function startServer() {
 
     const server = createServer((req, res) => {
       const origin = req.headers.origin ?? "";
-      res.setHeader("Access-Control-Allow-Origin", origin ? (isAllowedOrigin(origin) ? origin : "null") : "*");
+      if (!isLocalHost(req.headers.host) || (origin && !isAllowedOrigin(origin))) {
+        res.writeHead(403);
+        res.end();
+        return;
+      }
+      res.setHeader("Access-Control-Allow-Origin", origin || "null");
+      res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
       res.setHeader("Cache-Control", "no-store");
       // Chrome'un Private Network Access kontrolü: https sayfadan 127.0.0.1'e istek bu başlık olmadan engellenir.

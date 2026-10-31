@@ -5,7 +5,7 @@ programının kaynak kodunu ve indirilebilir sürümlerini barındırır. Progra
 ([MIT lisansı](LICENSE)): ne yaptığını satır satır okuyabilir, istersen kendin derleyebilirsin.
 
 **[→ Son sürümü indir](https://github.com/yagizberkesu/sauscript-releases/releases/latest)**  
-Dosya adı sürüm numarasını taşır, örneğin `SAUYardimci-1.3.2.exe`.
+Dosya adı sürüm numarasını taşır, örneğin `SAUYardimci-1.3.3.exe`.
 
 ## SAÜScript nedir
 
@@ -46,7 +46,7 @@ v1.2.0'dan itibaren her sürüm GitHub Actions üzerinde kaynak koddan otomatik 
 exe'nin SHA256 özeti ve `.sha256` dosyası bulunur. PowerShell'de karşılaştırmak için:
 
 ```powershell
-Get-FileHash .\SAUYardimci-1.3.2.exe
+Get-FileHash .\SAUYardimci-1.3.3.exe
 ```
 
 ## Gizlilik
@@ -63,6 +63,7 @@ Get-FileHash .\SAUYardimci-1.3.2.exe
 | [`scripts/fetch-notlar-handler.ts`](scripts/fetch-notlar-handler.ts) | Programın kendisi: tarayıcıyı açar, SABİS sayfasının metnini okur, `127.0.0.1:53412` üzerinden siteye verir |
 | [`scripts/build-exe.mjs`](scripts/build-exe.mjs) | Kodu Node.js'in [tek dosyalık çalıştırılabilir](https://nodejs.org/api/single-executable-applications.html) özelliğiyle `.exe`'ye paketler |
 | [`src/parser.ts`](src/parser.ts), [`src/types.ts`](src/types.ts) | Transkript metnini derslere ayıran, sitedekiyle aynı ayrıştırıcı |
+| [`src/identity.ts`](src/identity.ts) | Sayfadan öğrencinin adını ve numarasını okur; site bununla verinin doğru profile ait olduğunu denetler |
 
 Programın dış bağımlılığı yoktur; yalnızca Node.js'in kendi modüllerini kullanır. İnternete yalnızca
 açtığın tarayıcı penceresi üzerinden, SABİS'e (`obs.sabis.sakarya.edu.tr`) bağlanır.

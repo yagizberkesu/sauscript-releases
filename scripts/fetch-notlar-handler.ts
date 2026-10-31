@@ -7,6 +7,7 @@ import { isSea } from "node:sea";
 import { join } from "node:path";
 import { parsePastedTranscript, parseSelectedCourses, transcriptLooksValid } from "../src/parser";
 import { SAU_GRADE_POINTS } from "../src/types";
+import { extractIdentity } from "../src/identity";
 
 const OBS_ORIGIN = "https://obs.sabis.sakarya.edu.tr";
 const TRANSCRIPT_URL = `${OBS_ORIGIN}/Transkript`;
@@ -368,7 +369,7 @@ async function waitForDebugPort() {
 // --- Hedef sayfalar -------------------------------------------------------
 
 interface Target {
-  key: "transkript" | "secilen" | "program";
+  key: "transkript" | "secilen" | "program" | "anasayfa";
   url: string;
   label: string;
   debugFile: string;
@@ -376,6 +377,8 @@ interface Target {
   requireUrl?: boolean;
   /** Düz metin yerine sayfadan yapılandırılmış veri çıkaran ifade. */
   scrape?: string;
+  /** Adres eşleşmesi önekle yetmiyorsa (ör. Anasayfa, her adresin öneki). */
+  matchUrl?(url: string): boolean;
   /** Sayfa metni işlenebilir hale geldi mi? */
   isReady(text: string): boolean;
   /** Sayfa yüklendi ama gösterecek bir şey yok mu (ör. boş ders programı)? */
@@ -499,6 +502,18 @@ const scheduleTarget: Target = {
   build(text) { return JSON.stringify({ mode: this.key, text }); }
 };
 
+/** Öğrenci numarası yalnızca Anasayfa'da yazıyor; profil eşleştirmesi için okunur. */
+const homeTarget: Target = {
+  key: "anasayfa",
+  url: `${OBS_ORIGIN}/`,
+  label: "Anasayfa",
+  debugFile: "anasayfa-debug.txt",
+  requireUrl: true,
+  matchUrl: (url) => url.split(/[?#]/)[0].replace(/\/$/, "") === OBS_ORIGIN,
+  isReady: (text) => !!extractIdentity(text)?.number,
+  build(text) { return JSON.stringify({ mode: this.key, text }); }
+};
+
 /** Tarayıcının "sayfa bulunamadı" ekranı ya da sunucu hata sayfası asla veri sayılmaz. */
 const ERROR_PAGE = /HTTP ERROR \d{3}|sayfas[ıi] bulunam|page (?:not found|isn.t working)|404 Not Found|Server Error/i;
 
@@ -564,7 +579,7 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
         session ??= await CdpSession.open(page);
         const result = await session.send("Runtime.evaluate", { expression: target.scrape ?? SCRAPE_SNIPPET, returnByValue: true });
         const text = String(result?.result?.value ?? "");
-        const onUrl = page.url.toLowerCase().startsWith(target.url.toLowerCase());
+        const onUrl = target.matchUrl ? target.matchUrl(page.url) : page.url.toLowerCase().startsWith(target.url.toLowerCase());
         const onTargetPage = !target.requireUrl || onUrl;
         emptyPolls = onUrl && target.isSettledEmpty?.(text) ? emptyPolls + 1 : 0;
 
@@ -632,7 +647,7 @@ function registerProtocol(exePath: string) {
   return command;
 }
 
-const DISPLAY_VERSION = "1.3.2";
+const DISPLAY_VERSION = "1.3.3";
 const UNINSTALL_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SAUScript";
 const PROTOCOL_KEY = "HKCU\\Software\\Classes\\sauscript";
 
@@ -821,24 +836,32 @@ async function main() {
     const text = await waitForPageText(debugPort, target);
     await writeFile(join(HOME_DIR, target.debugFile), text, "utf-8").catch(() => {});
 
+    // Kullanıcı zaten giriş yaptı; ek sayfalar açılmazsa uzun süre bekletmeden geç.
+    const readOptional = async (extra: Target) => {
+      try {
+        const extraText = await waitForPageText(debugPort, extra, SECONDARY_TIMEOUT);
+        await writeFile(join(HOME_DIR, extra.debugFile), extraText, "utf-8").catch(() => {});
+        log(`${extra.label} okundu.`);
+        return extraText;
+      } catch (error) {
+        log(`${extra.label} okunamadı, olan verilerle devam edilecek. ${error instanceof Error ? error.message : ""}`.trim());
+        return null;
+      }
+    };
+
+    // Site, verinin açık profilin sahibine ait olduğunu bu bilgiyle denetler.
+    let identity = extractIdentity(text);
+    if (!identity?.number) {
+      setPhase("reading", "Öğrenci bilgisi okunuyor…");
+      const homeText = await readOptional(homeTarget);
+      identity = (homeText && extractIdentity(homeText)) || identity;
+    }
+
     if (isCombined) {
       // Transkript okundu; şimdi seçilen dersleri de çekmeye çalış.
       const courses = parsePastedTranscript(text);
       log(`Transkript okundu: ${courses.length} ders. Seçilen dersler sayfasına geçiliyor…`);
       setPhase("reading", `${courses.length} ders bulundu. Seçilen Dersler sayfası okunuyor…`);
-
-      // Kullanıcı zaten giriş yaptı; ek sayfalar açılmazsa uzun süre bekletmeden geç.
-      const readOptional = async (extra: Target) => {
-        try {
-          const extraText = await waitForPageText(debugPort, extra, SECONDARY_TIMEOUT);
-          await writeFile(join(HOME_DIR, extra.debugFile), extraText, "utf-8").catch(() => {});
-          log(`${extra.label} okundu.`);
-          return extraText;
-        } catch (error) {
-          log(`${extra.label} okunamadı, olan verilerle devam edilecek. ${error instanceof Error ? error.message : ""}`.trim());
-          return null;
-        }
-      };
 
       const selectedText = await readOptional(selectedCoursesTarget);
       setPhase("reading", "Ders Programı okunuyor…");
@@ -852,14 +875,14 @@ async function main() {
         termPlan: { season: "fall", selections: {}, scores: {}, goals: {}, started: false, startedAt: "" },
         theme: "light"
       };
-      const result: Record<string, unknown> = { mode: "combined", backup };
+      const result: Record<string, unknown> = { mode: "combined", backup, identity };
       if (selectedText && parseSelectedCourses(selectedText).length > 0) result.selectedText = selectedText;
       if (scheduleText && parseProgram(scheduleText).count > 0) result.scheduleText = scheduleText;
 
       setPhase("ready", `${courses.length} ders bulundu, tüm bilgiler aktarılıyor…`);
       payload = JSON.stringify(result);
     } else {
-      payload = target.build(text);
+      payload = JSON.stringify({ ...JSON.parse(target.build(text)), identity });
     }
   } catch (error) {
     setPhase("error", error instanceof Error ? error.message : String(error));

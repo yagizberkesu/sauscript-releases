@@ -4,7 +4,8 @@ Bu depo, [**SAÜScript**](https://yagizberkesu.github.io/sauscript/) için masa�
 programının kaynak kodunu ve indirilebilir sürümlerini barındırır. Program açık kaynaklıdır
 ([MIT lisansı](LICENSE)): ne yaptığını satır satır okuyabilir, istersen kendin derleyebilirsin.
 
-**[→ Son sürümü indir](https://github.com/yagizberkesu/sauscript-releases/releases/latest/download/SAUScript-Yardimci.exe)**
+**[→ Son sürümü indir](https://github.com/yagizberkesu/sauscript-releases/releases/latest)**  
+Dosya adı sürüm numarasını taşır, örneğin `SAUYardimci-1.3.1.exe`.
 
 ## SAÜScript nedir
 
@@ -24,7 +25,7 @@ sayfayı kopyalayıp yapıştırman gerekir. Bu program o adımı tamamen kaldı
 
 ## Kurulum
 
-1. Yukarıdaki bağlantıdan `SAUScript-Yardimci.exe` dosyasını indir.
+1. Yukarıdaki bağlantıdan `SAUYardimci-<sürüm>.exe` dosyasını indir.
 2. Çift tıkla.
 
 Hepsi bu. Node.js, npm veya ayrı bir tarayıcı indirmesi gerekmez — her şey tek dosyanın içinde.
@@ -42,10 +43,10 @@ Program ücretli bir kod imzalama sertifikasıyla imzalanmadığı için Windows
 ### İndirdiğin dosyayı doğrulama
 
 v1.2.0'dan itibaren her sürüm GitHub Actions üzerinde kaynak koddan otomatik derlenir; sürüm sayfasında
-exe'nin SHA256 özeti ve `SAUScript-Yardimci.exe.sha256` dosyası bulunur. PowerShell'de karşılaştırmak için:
+exe'nin SHA256 özeti ve `.sha256` dosyası bulunur. PowerShell'de karşılaştırmak için:
 
 ```powershell
-Get-FileHash .\SAUScript-Yardimci.exe
+Get-FileHash .\SAUYardimci-1.3.1.exe
 ```
 
 ## Gizlilik

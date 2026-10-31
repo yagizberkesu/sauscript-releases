@@ -414,23 +414,26 @@ const selectedCoursesTarget: Target = {
 
 const examsTarget: Target = {
   key: "sinav",
-  url: `${OBS_ORIGIN}/Ogrenci/SinavTakvimi`,
+  url: `${OBS_ORIGIN}/Sinav/Takvim`,
   label: "Sınav Takvimi",
   debugFile: "sinav-takvimi-debug.txt",
   requireUrl: true,
-  isReady: (text) => text.includes("Sınav") || text.includes("Tarih"),
+  isReady: (text) => /\d{2}\.\d{2}\.\d{4}/.test(text),
   build(text) { return JSON.stringify({ mode: this.key, text }); }
 };
 
 const scheduleTarget: Target = {
   key: "program",
-  url: `${OBS_ORIGIN}/Ogrenci/DersProgrami`,
+  url: `${OBS_ORIGIN}/Program`,
   label: "Ders Programı",
   debugFile: "ders-programi-debug.txt",
   requireUrl: true,
-  isReady: (text) => text.includes("Pazartesi") || text.includes("Ders"),
+  isReady: (text) => /\d{1,2}[:.]\d{2}/.test(text) && /pazartes|sal[ıiIİ]|çarşamba|perşembe|cuma/i.test(text),
   build(text) { return JSON.stringify({ mode: this.key, text }); }
 };
+
+/** Tarayıcının "sayfa bulunamadı" ekranı ya da sunucu hata sayfası asla veri sayılmaz. */
+const ERROR_PAGE = /HTTP ERROR \d{3}|sayfas[ıi] bulunam|page (?:not found|isn.t working)|404 Not Found|Server Error/i;
 
 /**
  * Kullanıcı SABİS girişini açılan pencerede kendisi yapar; burada sadece adres
@@ -443,6 +446,7 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
   // OBS'e gidilip login'e yönlendirilirken adres bir an OBS'te görünüyor; "giriş
   // yapıldı" demeden önce birkaç tur üst üste OBS'te kalmasını bekliyoruz.
   let obsStreak = 0;
+  let failure = "";
 
   const loginMessage = `Tarayıcı açıldı. SABİS'e giriş yap — ${target.label} sayfası kendiliğinden açılacak.`;
   const readingMessage = `Giriş yapıldı. ${target.label} sayfası okunuyor…`;
@@ -450,7 +454,9 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
     if (status.phase !== phase || status.message !== message) setPhase(phase, message);
   };
 
-  setPhase("login", loginMessage);
+  // Kısa süreli okumalar ek sayfalar içindir; kullanıcı o noktada zaten giriş yapmıştır.
+  if (timeout < LOGIN_TIMEOUT) setPhase("reading", readingMessage);
+  else setPhase("login", loginMessage);
 
   // Tarayıcının açık olup olmadığına süreç kimliğine değil, hata ayıklama
   // bağlantısına bakarak karar veriyoruz: aynı profille bir pencere zaten
@@ -491,10 +497,12 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
         const result = await session.send("Runtime.evaluate", { expression: SCRAPE_SNIPPET, returnByValue: true });
         const text = String(result?.result?.value ?? "");
         const onTargetPage = !target.requireUrl || page.url.toLowerCase().startsWith(target.url.toLowerCase());
-        if (onTargetPage && target.isReady(text)) return text;
-
-        // Doğru alan adındayız ama hedef sayfada değiliz: oraya götür.
-        if (Date.now() - lastNavigation > 6000) {
+        if (onTargetPage && target.requireUrl && ERROR_PAGE.test(text)) {
+          failure = `${target.label} sayfası açılmadı (${page.url}).`;
+        } else if (onTargetPage && target.isReady(text)) {
+          return text;
+        } else if (Date.now() - lastNavigation > 6000) {
+          // Doğru alan adındayız ama hedef sayfada değiliz: oraya götür.
           lastNavigation = Date.now();
           await session.send("Page.navigate", { url: target.url });
         }
@@ -503,6 +511,8 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
         session = null;
       }
 
+      // İç try'daki catch hatayı yutmasın diye dışarıda fırlatılıyor.
+      if (failure) throw new Error(failure);
       await sleep(1500);
     }
   } finally {
@@ -544,7 +554,7 @@ function registerProtocol(exePath: string) {
   return command;
 }
 
-const DISPLAY_VERSION = "1.3.0";
+const DISPLAY_VERSION = "1.3.1";
 const UNINSTALL_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SAUScript";
 const PROTOCOL_KEY = "HKCU\\Software\\Classes\\sauscript";
 
@@ -746,8 +756,8 @@ async function main() {
           await writeFile(join(HOME_DIR, extra.debugFile), extraText, "utf-8").catch(() => {});
           log(`${extra.label} okundu.`);
           return extraText;
-        } catch {
-          log(`${extra.label} okunamadı, olan verilerle devam edilecek.`);
+        } catch (error) {
+          log(`${extra.label} okunamadı, olan verilerle devam edilecek. ${error instanceof Error ? error.message : ""}`.trim());
           return null;
         }
       };

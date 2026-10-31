@@ -1,7 +1,7 @@
 {
   "name": "sauscript-yardimci",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "SAÜScript masaüstü yardımcı programı: SABİS transkriptini yerel tarayıcıda okuyup SAÜScript'e aktarır.",
   "license": "MIT",
   "type": "module",

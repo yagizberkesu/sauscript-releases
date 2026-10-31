@@ -88,9 +88,16 @@ npm run file       # siteye aktarmak yerine sonucu JSON dosyasına yazar
 
 ## Kaldırma
 
-1. `%LOCALAPPDATA%\SAUScript` klasörünü sil.
-2. Tarayıcı oturumunu da temizlemek istersen `%USERPROFILE%\.sauscript` klasörünü sil.
-3. Kayıt defterinden `HKCU\Software\Classes\sauscript` anahtarını sil (isteğe bağlı).
+**Windows Ayarlar › Uygulamalar › Yüklü uygulamalar › SAÜScript+ Yardımcı › Kaldır.**
+Program onay ister; ardından kendisini, SABİS için açılan tarayıcı profilini ve `sauscript://`
+bağlantısını siler. Sitedeki derslerin ve notların etkilenmez.
+
+1.3.0'dan eski bir sürüm kurduysan program listede görünmeyebilir. Programı bir kez kullanınca
+listeye eklenir; ya da şunları elle silebilirsin:
+
+1. `%LOCALAPPDATA%\SAUScript` klasörü
+2. `%USERPROFILE%\.sauscript` klasörü (tarayıcı oturumu ve kayıtlar)
+3. Kayıt defterinde `HKCU\Software\Classes\sauscript` anahtarı
 
 ---
 

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { writeFile, mkdir } from "node:fs/promises";
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { execFileSync, spawn, ChildProcess } from "node:child_process";
 import { homedir } from "node:os";
 import { isSea } from "node:sea";
@@ -12,7 +12,7 @@ const OBS_ORIGIN = "https://obs.sabis.sakarya.edu.tr";
 const TRANSCRIPT_URL = `${OBS_ORIGIN}/Transkript`;
 const SELECTED_COURSES_URL = `${OBS_ORIGIN}/Ders`;
 const PORT = 53412;
-const HELPER_VERSION = 3;
+const HELPER_VERSION = 4;
 const HOME_DIR = join(homedir(), ".sauscript");
 const PROFILE_DIR = join(HOME_DIR, "browser-profile");
 const LOGIN_TIMEOUT = 15 * 60 * 1000;
@@ -544,6 +544,69 @@ function registerProtocol(exePath: string) {
   return command;
 }
 
+const DISPLAY_VERSION = "1.3.0";
+const UNINSTALL_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SAUScript";
+const PROTOCOL_KEY = "HKCU\\Software\\Classes\\sauscript";
+
+/** Windows "Yüklü uygulamalar" listesinde görünür; oradan Kaldır denince --uninstall çalışır. */
+function registerUninstallEntry(exePath: string) {
+  const sizeKb = Math.round(statSync(exePath).size / 1024);
+  const values: [string, "REG_SZ" | "REG_DWORD", string][] = [
+    ["DisplayName", "REG_SZ", "SAÜScript+ Yardımcı"],
+    ["DisplayVersion", "REG_SZ", DISPLAY_VERSION],
+    ["Publisher", "REG_SZ", "Yağız Berke Su"],
+    ["DisplayIcon", "REG_SZ", exePath],
+    ["InstallLocation", "REG_SZ", INSTALL_DIR],
+    ["URLInfoAbout", "REG_SZ", "https://yagizberkesu.github.io/sauscript/"],
+    ["UninstallString", "REG_SZ", `"${exePath}" --uninstall`],
+    ["QuietUninstallString", "REG_SZ", `"${exePath}" --uninstall --quiet`],
+    ["NoModify", "REG_DWORD", "1"],
+    ["NoRepair", "REG_DWORD", "1"],
+    ["EstimatedSize", "REG_DWORD", String(sizeKb)]
+  ];
+  for (const [name, type, data] of values) {
+    execFileSync("reg", ["add", UNINSTALL_KEY, "/v", name, "/t", type, "/d", data, "/f"], { stdio: ["ignore", "ignore", "pipe"] });
+  }
+}
+
+function runUninstaller(quiet: boolean) {
+  if (!quiet && !askYesNo(
+    "SAÜScript+ Yardımcı bu bilgisayardan kaldırılsın mı?\n\n" +
+    "Program, SABİS için açılan tarayıcı profili ve sauscript:// bağlantısı silinir.\n" +
+    "Sitedeki derslerin ve notların etkilenmez.",
+    "SAÜScript+ Yardımcı'yı kaldır"
+  )) return 0;
+
+  for (const key of [PROTOCOL_KEY, UNINSTALL_KEY]) {
+    try {
+      execFileSync("reg", ["delete", key, "/f"], { stdio: "ignore" });
+    } catch {
+      // anahtar zaten yok
+    }
+  }
+  // log() bu klasörü yeniden oluşturacağı için buradan sonra log yazılmaz.
+  try {
+    rmSync(HOME_DIR, { recursive: true, force: true });
+  } catch {
+    // tarayıcı profili açıksa bazı dosyalar kalabilir
+  }
+
+  if (process.execPath.toLowerCase().startsWith(INSTALL_DIR.toLowerCase())) {
+    // Çalışan exe kendini silemez: kapandıktan sonra klasörü silecek ayrı bir komut bırak.
+    spawn("cmd.exe", ["/d", "/s", "/c", `"ping -n 3 127.0.0.1 >nul & rmdir /s /q "${INSTALL_DIR}""`], {
+      detached: true, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true
+    }).unref();
+  } else {
+    rmSync(INSTALL_DIR, { recursive: true, force: true });
+  }
+
+  if (!quiet) showMessage("SAÜScript+ Yardımcı kaldırıldı.", "SAÜScript+ Yardımcı");
+  return 0;
+}
+
+/** PowerShell'de basit tırnak, iki basit tırnakla kaçırılır. */
+const psQuote = (value: string) => value.replace(/'/g, "''");
+
 /**
  * Exe, konsol penceresi açmasın diye GUI alt sistemiyle derleniyor; bu yüzden
  * kullanıcıya görünecek mesajlar Windows iletişim kutusuyla gösterilir.
@@ -554,15 +617,27 @@ function showMessage(text: string, title = "SAÜScript") {
     return;
   }
   try {
-    // Basit tırnak, PowerShell'de iki basit tırnakla kaçırılır.
-    const escaped = (value: string) => value.replace(/'/g, "''");
     execFileSync("powershell", [
       "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
       `Add-Type -AssemblyName System.Windows.Forms;` +
-      `[System.Windows.Forms.MessageBox]::Show('${escaped(text)}','${escaped(title)}') | Out-Null`
+      `[System.Windows.Forms.MessageBox]::Show('${psQuote(text)}','${psQuote(title)}') | Out-Null`
     ], { stdio: "ignore", windowsHide: true });
   } catch {
     console.log(text);
+  }
+}
+
+function askYesNo(text: string, title: string) {
+  if (process.platform !== "win32") return true;
+  try {
+    const answer = execFileSync("powershell", [
+      "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+      `Add-Type -AssemblyName System.Windows.Forms;` +
+      `[System.Windows.Forms.MessageBox]::Show('${psQuote(text)}','${psQuote(title)}','YesNo','Question')`
+    ], { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    return answer.trim() === "Yes";
+  } catch {
+    return false;
   }
 }
 
@@ -582,6 +657,7 @@ function runInstaller() {
   try {
     const exePath = installSelf();
     registerProtocol(exePath);
+    if (isSea()) registerUninstallEntry(exePath);
     log(`Kuruldu: ${exePath} · tarayıcı: ${browsers[0]}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -611,6 +687,17 @@ async function main() {
     const [found] = installedChromiumPaths();
     if (found) console.log(found);
     process.exit(found ? 0 : 1);
+  }
+
+  if (arg.includes("--uninstall")) process.exit(runUninstaller(arg.includes("--quiet")));
+
+  // 1.3.0'dan önce kurananlar da "Yüklü uygulamalar" listesine girsin.
+  if (args.length && isSea() && process.execPath.toLowerCase() === INSTALL_PATH.toLowerCase()) {
+    try {
+      registerUninstallEntry(INSTALL_PATH);
+    } catch {
+      // kayıt yazılamazsa asıl işi engelleme
+    }
   }
 
   // Argümansız çalıştırma (exe'ye çift tıklama) kurulum demektir.

@@ -49,6 +49,12 @@ exe'nin SHA256 özeti ve `.sha256` dosyası bulunur. PowerShell'de karşılaşt�
 Get-FileHash .\SAUYardimci-1.3.3.exe
 ```
 
+## Hata bildir veya öneride bulun
+
+[Geri bildirim formunu doldur](https://docs.google.com/forms/d/e/1FAIpQLSdiPa4Blz3DX4B03ScLVz7sJpw27kKj2MD7XNZjH8zjJOsdtg/viewform)
+(hesap gerekmez). GitHub hesabın varsa [Issues](https://github.com/yagizberkesu/sauscript-releases/issues/new/choose)
+sayfasını da kullanabilirsin.
+
 ## Gizlilik
 
 - SABİS şifreni **program görmez**. Şifreyi açılan tarayıcı penceresinde doğrudan SABİS'e girersin.

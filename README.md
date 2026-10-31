@@ -5,7 +5,7 @@ programının kaynak kodunu ve indirilebilir sürümlerini barındırır. Progra
 ([MIT lisansı](LICENSE)): ne yaptığını satır satır okuyabilir, istersen kendin derleyebilirsin.
 
 **[→ Son sürümü indir](https://github.com/yagizberkesu/sauscript-releases/releases/latest)**  
-Dosya adı sürüm numarasını taşır, örneğin `SAUYardimci-1.3.1.exe`.
+Dosya adı sürüm numarasını taşır, örneğin `SAUYardimci-1.3.2.exe`.
 
 ## SAÜScript nedir
 
@@ -46,7 +46,7 @@ v1.2.0'dan itibaren her sürüm GitHub Actions üzerinde kaynak koddan otomatik 
 exe'nin SHA256 özeti ve `.sha256` dosyası bulunur. PowerShell'de karşılaştırmak için:
 
 ```powershell
-Get-FileHash .\SAUYardimci-1.3.1.exe
+Get-FileHash .\SAUYardimci-1.3.2.exe
 ```
 
 ## Gizlilik

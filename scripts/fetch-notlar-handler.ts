@@ -368,14 +368,18 @@ async function waitForDebugPort() {
 // --- Hedef sayfalar -------------------------------------------------------
 
 interface Target {
-  key: "transkript" | "secilen" | "sinav" | "program";
+  key: "transkript" | "secilen" | "program";
   url: string;
   label: string;
   debugFile: string;
   /** Metin kontrolü gevşekse önceki sayfa yanlışlıkla "hazır" sayılmasın diye adres de eşleşmeli. */
   requireUrl?: boolean;
+  /** Düz metin yerine sayfadan yapılandırılmış veri çıkaran ifade. */
+  scrape?: string;
   /** Sayfa metni işlenebilir hale geldi mi? */
   isReady(text: string): boolean;
+  /** Sayfa yüklendi ama gösterecek bir şey yok mu (ör. boş ders programı)? */
+  isSettledEmpty?(text: string): boolean;
   build(text: string): string;
 }
 
@@ -412,14 +416,72 @@ const selectedCoursesTarget: Target = {
   }
 };
 
-const examsTarget: Target = {
-  key: "sinav",
-  url: `${OBS_ORIGIN}/Sinav/Takvim`,
-  label: "Sınav Takvimi",
-  debugFile: "sinav-takvimi-debug.txt",
-  requireUrl: true,
-  isReady: (text) => /\d{2}\.\d{2}\.\d{4}/.test(text),
-  build(text) { return JSON.stringify({ mode: this.key, text }); }
+/**
+ * SABİS ders programı haftalık bir takvim: düz metinde dersin hangi güne ait olduğu
+ * yazmıyor. Gün, ders kutusunun yatay konumunu "21/9 Pzt" sütun başlıklarıyla
+ * karşılaştırarak bulunur; sınıf adlarına bağlı kalınmaz.
+ */
+const PROGRAM_SNIPPET = `(() => {
+  const dayCodes = { pzt: 0, sal: 1, "çar": 2, car: 2, per: 3, cum: 4, cmt: 5, paz: 6 };
+  const dayRe = /^\\s*\\d{1,2}\\/\\d{1,2}\\s+(Pzt|Sal|Çar|Car|Per|Cum|Cmt|Paz)\\s*$/i;
+  const timeRe = /^\\s*(\\d{1,2}:\\d{2})\\s*[-–]\\s*(\\d{1,2}:\\d{2})/;
+  const docs = [document];
+  for (const frame of document.querySelectorAll("iframe")) {
+    try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch (error) { /* farklı köken */ }
+  }
+  const headers = [];
+  const events = [];
+  const seen = new Set();
+  for (const doc of docs) {
+    const all = Array.from(doc.querySelectorAll("body *"));
+    for (const el of all) {
+      const text = (el.textContent || "").trim();
+      const match = text.match(dayRe);
+      if (!match || Array.from(el.children).some((child) => dayRe.test(child.textContent || ""))) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0) headers.push({ day: dayCodes[match[1].toLocaleLowerCase("tr")], left: rect.left, right: rect.right });
+    }
+    const candidates = all.filter((el) => timeRe.test(el.innerText || "") && /[A-ZÇĞİÖŞÜ]{2,4}\\d{3}/.test(el.innerText || ""));
+    for (const el of candidates) {
+      if (candidates.some((other) => other !== el && el.contains(other))) continue;
+      // Derslik bilgisi çoğu zaman bir üst kutuda: tek bir saat aralığı içerdiği sürece yukarı çık.
+      const timeCount = (node) => ((node.innerText || "").match(/\\d{1,2}:\\d{2}\\s*[-–]\\s*\\d{1,2}:\\d{2}/g) || []).length;
+      let box = el;
+      while (box.parentElement && box.parentElement !== doc.body && timeCount(box.parentElement) === 1) box = box.parentElement;
+      const lines = (box.innerText || "").split("\\n").map((line) => line.trim()).filter(Boolean);
+      const time = lines[0].match(timeRe);
+      const title = lines[1] || "";
+      const codeMatch = title.match(/^([A-ZÇĞİÖŞÜ]{2,4}\\d{3})\\s*-\\s*(.+)$/);
+      const rect = el.getBoundingClientRect();
+      const center = rect.left + rect.width / 2;
+      const header = headers.find((h) => center >= h.left && center <= h.right);
+      const event = {
+        day: header ? header.day : -1,
+        start: time[1],
+        end: time[2],
+        code: codeMatch ? codeMatch[1] : "",
+        name: codeMatch ? codeMatch[2].trim() : title,
+        place: lines.slice(2).join(" ")
+      };
+      const key = [event.day, event.start, event.code, event.name].join("|");
+      if (!seen.has(key)) { seen.add(key); events.push(event); }
+    }
+  }
+  return JSON.stringify({
+    format: "sauscript-program-v1",
+    rendered: headers.length >= 5,
+    events,
+    head: (document.body ? document.body.innerText : "").slice(0, 300)
+  });
+})()`;
+
+const parseProgram = (text: string) => {
+  try {
+    const data = JSON.parse(text) as { rendered?: boolean; events?: unknown[] };
+    return { rendered: !!data.rendered, count: Array.isArray(data.events) ? data.events.length : 0 };
+  } catch {
+    return { rendered: false, count: 0 };
+  }
 };
 
 const scheduleTarget: Target = {
@@ -428,7 +490,12 @@ const scheduleTarget: Target = {
   label: "Ders Programı",
   debugFile: "ders-programi-debug.txt",
   requireUrl: true,
-  isReady: (text) => /\d{1,2}[:.]\d{2}/.test(text) && /pazartes|sal[ıiIİ]|çarşamba|perşembe|cuma/i.test(text),
+  scrape: PROGRAM_SNIPPET,
+  isReady: (text) => parseProgram(text).count > 0,
+  isSettledEmpty: (text) => {
+    const program = parseProgram(text);
+    return program.rendered && program.count === 0;
+  },
   build(text) { return JSON.stringify({ mode: this.key, text }); }
 };
 
@@ -447,6 +514,7 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
   // yapıldı" demeden önce birkaç tur üst üste OBS'te kalmasını bekliyoruz.
   let obsStreak = 0;
   let failure = "";
+  let emptyPolls = 0;
 
   const loginMessage = `Tarayıcı açıldı. SABİS'e giriş yap — ${target.label} sayfası kendiliğinden açılacak.`;
   const readingMessage = `Giriş yapıldı. ${target.label} sayfası okunuyor…`;
@@ -494,15 +562,25 @@ async function waitForPageText(debugPort: number, target: Target, timeout = LOGI
 
       try {
         session ??= await CdpSession.open(page);
-        const result = await session.send("Runtime.evaluate", { expression: SCRAPE_SNIPPET, returnByValue: true });
+        const result = await session.send("Runtime.evaluate", { expression: target.scrape ?? SCRAPE_SNIPPET, returnByValue: true });
         const text = String(result?.result?.value ?? "");
-        const onTargetPage = !target.requireUrl || page.url.toLowerCase().startsWith(target.url.toLowerCase());
+        const onUrl = page.url.toLowerCase().startsWith(target.url.toLowerCase());
+        const onTargetPage = !target.requireUrl || onUrl;
+        emptyPolls = onUrl && target.isSettledEmpty?.(text) ? emptyPolls + 1 : 0;
+
         if (onTargetPage && target.requireUrl && ERROR_PAGE.test(text)) {
           failure = `${target.label} sayfası açılmadı (${page.url}).`;
         } else if (onTargetPage && target.isReady(text)) {
           return text;
-        } else if (Date.now() - lastNavigation > 6000) {
+        } else if (emptyPolls >= 3) {
+          return text;
+        } else if (!onUrl && Date.now() - lastNavigation > 6000) {
           // Doğru alan adındayız ama hedef sayfada değiliz: oraya götür.
+          lastNavigation = Date.now();
+          await session.send("Page.navigate", { url: target.url });
+        } else if (onUrl && !target.requireUrl && Date.now() - lastNavigation > 20000) {
+          // Ana sayfalarda (Transkript, Seçilen Dersler) uzun süre takılırsa bir kez tazele;
+          // ek sayfalar asla yeniden yüklenmez, yalnızca yüklenmeleri beklenir.
           lastNavigation = Date.now();
           await session.send("Page.navigate", { url: target.url });
         }
@@ -554,7 +632,7 @@ function registerProtocol(exePath: string) {
   return command;
 }
 
-const DISPLAY_VERSION = "1.3.1";
+const DISPLAY_VERSION = "1.3.2";
 const UNINSTALL_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SAUScript";
 const PROTOCOL_KEY = "HKCU\\Software\\Classes\\sauscript";
 
@@ -763,8 +841,6 @@ async function main() {
       };
 
       const selectedText = await readOptional(selectedCoursesTarget);
-      setPhase("reading", "Sınav Takvimi okunuyor…");
-      const examsText = await readOptional(examsTarget);
       setPhase("reading", "Ders Programı okunuyor…");
       const scheduleText = await readOptional(scheduleTarget);
 
@@ -778,8 +854,7 @@ async function main() {
       };
       const result: Record<string, unknown> = { mode: "combined", backup };
       if (selectedText && parseSelectedCourses(selectedText).length > 0) result.selectedText = selectedText;
-      if (examsText) result.examsText = examsText;
-      if (scheduleText) result.scheduleText = scheduleText;
+      if (scheduleText && parseProgram(scheduleText).count > 0) result.scheduleText = scheduleText;
 
       setPhase("ready", `${courses.length} ders bulundu, tüm bilgiler aktarılıyor…`);
       payload = JSON.stringify(result);
